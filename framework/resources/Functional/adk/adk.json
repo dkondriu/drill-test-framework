@@ -1,0 +1,20 @@
+{
+  "testId": "adk",
+  "type": "group",
+  "description": "...Test do simple select...",
+  "submit-type": "jdbc",
+  "categories": [
+    "functional"
+  ],
+  "matrices": [
+    {
+      "query-file": ".*.sql",
+      "schema": "cp",
+      "output-format": "tsv",
+      "expected-file": ".*.e_tsv",
+      "verification-type": [
+        "in-memory"
+      ]
+    }
+  ]
+}
