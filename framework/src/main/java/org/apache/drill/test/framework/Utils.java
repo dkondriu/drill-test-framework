@@ -38,12 +38,7 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Types;
 import java.sql.ResultSetMetaData;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Date;
-import java.util.List;
-import java.util.Map;
-import java.util.Properties;
+import java.util.*;
 import java.util.concurrent.ExecutionException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -279,7 +274,7 @@ public class Utils {
    *         executed.
    * @throws Exception
    */
-  public static List<DrillTestCase> getDrillTestCases() throws IOException {
+  public static Map<Integer, DrillTestCase> getDrillTestCases() throws IOException {
     
     String[] testDefSources = getTestDefSources();
     String[] testGroups = null;
@@ -288,7 +283,10 @@ public class Utils {
     } catch (Exception e) {
       LOG.info("Test groups not specified.  Will run all collected tests.");
     }
-    List<DrillTestCase> drillTestCases = new ArrayList<>();
+    //List<DrillTestCase> drillTestCases = new ArrayList<>();
+    /** modify drillTestCases  */
+    Map<Integer, DrillTestCase> drillTestCases = new HashMap<>();
+
     for (String testDefSource : testDefSources) {
       testDefSource = getAbsolutePath(testDefSource, DrillTestDefaults.DRILL_TESTDATA_DIR);
       File testDefSourceFile = new File(testDefSource);
@@ -316,6 +314,10 @@ public class Utils {
             break;
           }
         }
+
+        /** getting threads for each case: */
+        Integer threads = modeler.threads;
+
         if (!foundTests) {continue;}
         String queryFileExtension = modeler.matrices.get(0).inputFile;
         String expectedFileExtension = modeler.matrices.get(0).expectedFile;
@@ -357,8 +359,14 @@ public class Utils {
           //Expected File to find based on the original query Extension
           String expectedFileName = getExpectedFile(testQueryFile.getAbsolutePath(),
                     originalQueryFileExtension, expectedFileExtension);
-          if (expectedFileName != null) {
-            drillTestCases.add(new DrillTestCase(modeler, testQueryFile.getAbsolutePath(), expectedFileName));
+          if (expectedFileName != null && threads != null) {
+            //TODO re-check it:
+            //drillTestCases.add(threads, new DrillTestCase(modeler, testQueryFile.getAbsolutePath(), expectedFileName));
+            addToDrillTestCase(threads, new DrillTestCase(modeler, testQueryFile.getAbsolutePath(), expectedFileName), drillTestCases);
+          } else if (expectedFileName != null){
+            //TODO re-check it:
+            addToDrillTestCase(TestDriver.cmdParam.threads, new DrillTestCase(modeler, testQueryFile.getAbsolutePath(), expectedFileName), drillTestCases);
+
           }
         }
       }
@@ -368,7 +376,20 @@ public class Utils {
     }
     return drillTestCases;
   }
-  
+
+  //TODO re check it
+  /**added method: */
+  private static Map<Integer, DrillTestCase> addToDrillTestCase (Integer key, DrillTestCase drillTestCase, Map<Integer, DrillTestCase> drillTestCaseMap){
+    if (drillTestCaseMap.get(key) != null){
+      List<DrillTest> currentList = (List<DrillTest>) drillTestCaseMap.get(key);
+      currentList.addAll((Collection<? extends DrillTest>) drillTestCase);
+      drillTestCaseMap.add(key,currentList);
+    } else {
+      drillTestCaseMap.add(key, drillTestCase);
+    }
+    return drillTestCaseMap;
+  }
+
   private static List<File> searchFiles(File root, String regex) throws FileNotFoundException {
 	    List<File> list = new ArrayList<File>();
 	    Pattern pattern = Pattern.compile(regex + "$");

@@ -47,6 +47,7 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.DatabaseMetaData;
+import java.util.stream.Collectors;
 
 public class TestDriver {
   private static final Logger LOG = Logger.getLogger("DrillTestLogger");
@@ -62,18 +63,18 @@ public class TestDriver {
 
   private static Configuration conf = new Configuration();
   public static final CmdParam cmdParam = new CmdParam();
-  
+
   public TestDriver() {
     connectionProperties = Utils.createConnectionProperties();
     connectionPool = new ConnectionPool(connectionProperties);
   }
-  
+
   public static void main(String[] args) throws Exception {
     JCommander jc = new JCommander(cmdParam);
     jc.setProgramName("TestDriver");
     try {
       jc.parse(args);
-      
+
     } catch (ParameterException e) {
       System.out.println("\n" + e.getMessage() + "\n");
       jc.usage();
@@ -112,15 +113,24 @@ public class TestDriver {
         DrillTestDefaults.LINE_BREAK + "\n" +
         Utils.getFrameworkVersion() + "\n" +
         DrillTestDefaults.LINE_BREAK + "\n");
-   
-    List<List<DrillTest>> executionFailureExceptions=Lists.newArrayList(); 
+
+    List<List<DrillTest>> executionFailureExceptions=Lists.newArrayList();
     for(int ii=0;ii<DrillTestDefaults.DRILL_EXCEPTION_REGEXES.length;ii++){
        executionFailureExceptions.add(new ArrayList<DrillTest>());
        //List<DrillTest> temp = (List<DrillTest>)Lists.newArrayList();
        //executionFailureExceptions.add((temp);
     }
-    HashMap<String,Integer> exceptionMessageSet = new HashMap<String,Integer>(); 
-    CancelingExecutor executor = new CancelingExecutor(cmdParam.threads, cmdParam.timeout);
+    HashMap<String,Integer> exceptionMessageSet = new HashMap<String,Integer>();
+    /** old code:*/
+    //ToDo: to delete:
+    //CancelingExecutor executor = new CancelingExecutor(cmdParam.threads, cmdParam.timeout);
+
+    /** new code: */
+    Map<Integer, DrillTestCase> drillTestCases = Utils.getDrillTestCases();
+
+    List<CancelingExecutor> runExecutors = drillTestCases.entrySet().stream()
+      .map( x -> new CancelingExecutor(x.getKey(), cmdParam.timeout))
+      .collect(Collectors.toList());
 
     final Stopwatch stopwatch = Stopwatch.createStarted();
     try {
@@ -129,7 +139,7 @@ public class TestDriver {
       e.printStackTrace();
       System.exit(-1);
     }
-    
+
     //Record JDBC driver name, version and other metadata info
     DatabaseMetaData dm = connection.getMetaData();
     LOG.info(DrillTestDefaults.LINE_BREAK +"\nJDBC DRIVER METADATA CATALOG\n"+DrillTestDefaults.LINE_BREAK+"\n"+ new DBMetaData(dm).toString() + DrillTestDefaults.LINE_BREAK);
@@ -156,13 +166,36 @@ public class TestDriver {
     setup();
     LOG.info("> INIT duration: " + stopwatch+"\n"+DrillTestDefaults.LINE_BREAK);
 
-    List<DrillTestCase> drillTestCases = Utils.getDrillTestCases();
+    /** modify drillTestCases collection*/
+    //List<DrillTestCase> drillTestCases = Utils.getDrillTestCases();
+    /** move declaration nad init to 127 line*/
+
     List<DrillTest> tests = Lists.newArrayList();
-    for (DrillTestCase testCase : drillTestCases) {
-      for (int clone = 0; clone < cmdParam.clones; clone++) {
-        tests.add(getDrillTest(testCase, connectionPool, clone, drillTestCases.size()));
+
+    //TODO : mabe not need it. to delete--
+    List<Integer> threadsCount =  drillTestCases.entrySet().stream()
+      .map(x -> x.getKey())
+      .collect(Collectors.toList());
+    for (int i =0 ; i<threadsCount.size(); i++){ }
+    //TODO : to delete--
+
+    /** i add this: */
+    for (int d = 0; d <drillTestCases.size(); d++ ) {
+      List<DrillTestCase> currentDrillTestCase = (List<DrillTestCase>) drillTestCases.get(d);
+      for (DrillTestCase testCase : currentDrillTestCase) {
+        for (int clone = 0; clone < cmdParam.clones; clone++) {
+          tests.add(getDrillTest(testCase, connectionPool, clone, currentDrillTestCase.size()));
+        }
       }
     }
+
+    /** old code. i comment it. to remove: */
+//    for (DrillTestCase testCase : drillTestCases) {
+//      for (int clone = 0; clone < cmdParam.clones; clone++) {
+//        tests.add(getDrillTest(testCase, connectionPool, clone, drillTestCases.size()));
+//      }
+//    }
+
     countTotalTests = drillTestCases.size();
 
     HashSet  <DrillTest> finalExecutionFailures = new HashSet<DrillTest>();
@@ -197,7 +230,7 @@ public class TestDriver {
     }
 
     for (i = 1; i < cmdParam.iterations+1; i++) {
-      
+
       List<DrillTest> passingTests = Lists.newArrayList();
       List<DrillTest> dataVerificationFailures = Lists.newArrayList();
       List<DrillTest> planVerificationFailures = Lists.newArrayList();
@@ -206,7 +239,7 @@ public class TestDriver {
       List<DrillTest> canceledTests = Lists.newArrayList();
       List<DrillTest> randomFailures = Lists.newArrayList();
       List<DrillTest> failingTests = Lists.newArrayList();
-      executionFailureExceptions = Lists.newArrayList(); 
+      executionFailureExceptions = Lists.newArrayList();
       for(int ii=0;ii<DrillTestDefaults.DRILL_EXCEPTION_REGEXES.length;ii++){
        executionFailureExceptions.add(new ArrayList<DrillTest>());
       }
@@ -309,18 +342,18 @@ public class TestDriver {
        * Tests which succeed are categorized as random failures.
        * To prevent long runtimes, cmdParam.threads is chosen as an arbitrary max limit.
        * If total failed tests are higher than the max defined above, we do not isolate random failures.
-       */ 
+       */
       if(failingTests.size() > 0 && failingTests.size() <= cmdParam.threads){
         LOG.info(DrillTestDefaults.LINE_BREAK+"\nISOLATING RANDOM FAILURES - Execution attempt 2 (of 2)\n"+DrillTestDefaults.LINE_BREAK);
         executor.executeAll(failingTests);
 	for(DrillTest test : failingTests){
-	  TestStatus testStatus = test.getTestStatus();         
+	  TestStatus testStatus = test.getTestStatus();
           if(testStatus==TestStatus.PASS){
             randomFailures.add(test);
           }
 	}
       }
-      
+
       if(randomFailures.size()>0){
         for (DrillTest test : randomFailures) {
 	  if(executionFailures.contains(test)){
@@ -369,7 +402,7 @@ public class TestDriver {
                  List listAtIndex = new ArrayList<DrillTest>();
                  listAtIndex.add(test);
                  executionFailureExceptions.set(index,listAtIndex);
-               } 
+               }
 	       else{
                  List listAtIndex = executionFailureExceptions.get(index);
                  listAtIndex.add(test);
@@ -437,7 +470,7 @@ public class TestDriver {
 	if(executionFailureExceptions != null){
           for (int ii=0;ii<executionFailureExceptions.size();ii++){
             if(executionFailureExceptions==null || executionFailureExceptions.get(ii)==null){
-            }    
+            }
             else if(executionFailureExceptions.get(ii)!=null && executionFailureExceptions.get(ii).size()!=0){
               if(ii<DrillTestDefaults.DRILL_EXCEPTION.VALIDATION_ERROR_INVALID_SCHEMA.values().length){
                 if(ii==0)
@@ -445,9 +478,9 @@ public class TestDriver {
                 else if(ii<executionFailureExceptions.size()-1)
                   LOG.info("\nCATEGORY - "+DrillTestDefaults.DRILL_EXCEPTION.VALIDATION_ERROR_INVALID_SCHEMA.values()[ii]+" ("+executionFailureExceptions.get(ii).size()+")");
                 else
-                  LOG.info("\n"+DrillTestDefaults.DRILL_EXCEPTION.VALIDATION_ERROR_INVALID_SCHEMA.values()[ii]+" ("+executionFailureExceptions.get(ii).size()+")");  
+                  LOG.info("\n"+DrillTestDefaults.DRILL_EXCEPTION.VALIDATION_ERROR_INVALID_SCHEMA.values()[ii]+" ("+executionFailureExceptions.get(ii).size()+")");
               }
-              else{ 
+              else{
                 if(ii==0)
                   LOG.info("UNCATEGORIZED "+(ii-DrillTestDefaults.DRILL_EXCEPTION.VALIDATION_ERROR_INVALID_SCHEMA.values().length+1)+"("+executionFailureExceptions.get(ii).size()+")");
                 else
@@ -455,9 +488,9 @@ public class TestDriver {
               }
               for(DrillTest t:executionFailureExceptions.get(ii)){
                 LOG.info(t.getInputFile());
-              }    
-            }    
-          }    
+              }
+            }
+          }
         }
       }
 
@@ -558,7 +591,7 @@ public class TestDriver {
       finalPlanVerificationFailures.addAll(planVerificationFailures);
       finalTimeoutFailures.addAll(timeoutFailures);
     }
-      
+
     if (cmdParam.iterations > 1) {
       LOG.info(DrillTestDefaults.LINE_BREAK+"\n"+String.format("\nCompleted %d iterations.\n  Passing tests: %d \n  Random failures: %d \n" +
           "  Execution Failures: %d\n  Data Verification Failures: %d\n  Plan Verification Failures: %d" +
@@ -611,7 +644,7 @@ public class TestDriver {
       	  }
       	}
     }
-    
+
     LOG.info(DrillTestDefaults.LINE_BREAK+"\n");
     LOG.info(DrillTestDefaults.LINE_BREAK+"\nTEARDOWN\n"+DrillTestDefaults.LINE_BREAK);
     teardown();
@@ -659,7 +692,7 @@ public class TestDriver {
         commitId = resultSet.getString("commit_id");
         version = resultSet.getString("version");
       }
-      
+
       // Setup injection map
       for (int i = 0; i < injectionKeys.length; i++) {
     	switch (injectionKeys[i]) {
@@ -668,7 +701,7 @@ public class TestDriver {
     	  break;
     	default:
     	  LOG.fatal("Injection parameter not recognized!");
-    	}    	
+    	}
       }
       connectionPool.releaseConnection(connection);
     } catch (IOException e) {
@@ -683,7 +716,7 @@ public class TestDriver {
 	}
     Thread.sleep(1000);
   }
-  
+
   private void teardown() {
 	String afterRunQueryFilename = DrillTestDefaults.TEST_ROOT_DIR + "/" + cmdParam.afterRunQueryFilename;
   LOG.info("> Executing queries\n");
@@ -708,7 +741,7 @@ public class TestDriver {
 		} catch (SQLException e1) {
 			e1.printStackTrace();
 		}
-	} 
+	}
 	connectionPool.releaseConnection(connection);
 
     // Stop Apache Minio server if it was started
@@ -772,7 +805,7 @@ public class TestDriver {
     }
 
     final Stopwatch stopwatch = Stopwatch.createStarted();
-    
+
     LOG.info("> Copying Data");
     copyExecutor.executeAll(copyTasks);
     copyExecutor.close();
@@ -844,7 +877,7 @@ public class TestDriver {
 	          + " has return code " + cmdConsOut.exitCode);
 	}
   }
-  
+
   private DrillTest getDrillTest(DrillTestCase modeler, ConnectionPool connectionPool, int cloneId, int totalCases) {
     switch(modeler.submitType) {
     case "jdbc":
@@ -859,7 +892,7 @@ public class TestDriver {
       throw new UnsupportedOperationException("Unknown query type: " + modeler.queryType);
     }
   }
-  
+
   private void queryMemoryUsage() throws IOException, SQLException {
 	String query = "select sum(heap_current) as heap_current, sum(direct_current) as direct_current, " +
 			"sum(jvm_direct_current) as jvm_direct_current from sys.memory";
@@ -937,7 +970,7 @@ public class TestDriver {
       Document document;
       for (DrillTest test : tests) {
         document = Json.newDocument();
-        document.set("_id", test.getTestId()+ "_" + new File(test.getInputFile()).getName() + "_" 
+        document.set("_id", test.getTestId()+ "_" + new File(test.getInputFile()).getName() + "_"
         		+ test.getCloneId() + "_" + iteration);
         document.set("queryFilepath", test.getInputFile().substring(test.getInputFile().indexOf("resources/")+10));
         String query = test.getQuery();
@@ -946,7 +979,7 @@ public class TestDriver {
         }
         document.set("query", query);
         document.set("status", test.getTestStatus().toString());
-        if(test.getTestStatus().equals(TestStatus.EXECUTION_FAILURE) 
+        if(test.getTestStatus().equals(TestStatus.EXECUTION_FAILURE)
         		|| test.getTestStatus().equals(TestStatus.DATA_VERIFICATION_FAILURE)
         		|| test.getTestStatus().equals(TestStatus.PLAN_VERIFICATION_FAILURE)) {
           document.set("errorMessage", test.getException().toString().replaceAll("\n",""));
@@ -965,7 +998,7 @@ public class TestDriver {
 
       // Upload report to DFS if the DRILL_REPORTS_DFS_DIR variable is set
       if (!DrillTestDefaults.DRILL_REPORTS_DFS_DIR.isEmpty()){
-        FileUtil.copy(localFS, new Path(reportFile.getAbsolutePath()), DFS, 
+        FileUtil.copy(localFS, new Path(reportFile.getAbsolutePath()), DFS,
         		new Path (DrillTestDefaults.DRILL_REPORTS_DFS_DIR + "/" + reportFile.getName()), true, false, DFS.getConf());
       }
     }
